@@ -100,4 +100,355 @@
     }
 
     #exportPdfBtn:hover {
-      backg
+      background: #7b1fa2;
+    }
+
+    #summary {
+      background: #f8f9fa;
+      border-top: 2px solid #ccc;
+      font-size: 16px;
+    }
+
+    #summary strong {
+      display: inline-block;
+      width: 180px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Wind Turbine Trip Planner</h1>
+
+  <!-- Add Task Form -->
+  <form id="taskForm">
+    <input type="text" id="location" placeholder="Location (City, GPS, or Address)" required />
+    <input type="text" id="name" placeholder="Turbine Name/ID" required />
+    <select id="type">
+      <option value="Maintenance">Maintenance</option>
+      <option value="Repair">Repair</option>
+      <option value="Inspection">Inspection</option>
+      <option value="Upgrade">Upgrade</option>
+    </select>
+    <input type="text" id="time" placeholder="Approx Time (e.g. 2h)" />
+    <textarea id="comments" placeholder="Comments"></textarea>
+    <button type="submit">Add Task</button>
+  </form>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Controls -->
+  <div id="controls">
+    <button id="refreshBtn">🔄 Refresh Weather</button>
+    <button id="routeBtn">🗺️ Plan Route</button>
+    <button id="exportCsvBtn">📊 Export CSV</button>
+    <button id="exportPdfBtn">📄 Export PDF</button>
+  </div>
+
+  <!-- Task List -->
+  <div id="taskList"></div>
+
+  <!-- Summary Dashboard -->
+  <div id="summary"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+  <script>
+    const form = document.getElementById("taskForm");
+    const taskList = document.getElementById("taskList");
+    const summaryDiv = document.getElementById("summary");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const routeBtn = document.getElementById("routeBtn");
+    const exportCsvBtn = document.getElementById("exportCsvBtn");
+    const exportPdfBtn = document.getElementById("exportPdfBtn");
+
+    let tasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    let map = L.map("map").setView([44.9778, -93.2650], 6); // Minnesota center
+    let markers = [];
+    let routeControl;
+
+    const apiKey = "2a38086dc2f585ac7817f626842e5d13"; // <-- Replace with your key
+
+    // Map base layer
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors",
+    }).addTo(map);
+
+    // Save tasks to local storage
+    function saveTasks() {
+      localStorage.setItem("tasks", JSON.stringify(tasks));
+    }
+
+    // Fetch weather data
+    async function fetchWeather(lat, lon) {
+      try {
+        const res = await fetch(
+          `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`
+        );
+        const data = await res.json();
+
+        const weatherText = `${data.weather[0].description}, ${data.main.temp}°C`;
+        const windSpeed = data.wind.speed;
+        let advisory = "";
+
+        if (windSpeed > 15) {
+          advisory = `⚠️ High wind (${windSpeed} m/s) — Not advisable`;
+        } else if (/storm|thunder|heavy rain/i.test(data.weather[0].description)) {
+          advisory = "⚠️ Stormy weather — Not advisable";
+        }
+
+        return {
+          text: weatherText + (advisory ? " | " + advisory : ""),
+          advisory: advisory,
+        };
+      } catch {
+        return { text: "Weather unavailable", advisory: "" };
+      }
+    }
+
+    // Render task list
+    async function renderTasks() {
+      taskList.innerHTML = "";
+      markers.forEach((m) => map.removeLayer(m));
+      markers = [];
+
+      for (let i = 0; i < tasks.length; i++) {
+        const task = tasks[i];
+
+        const div = document.createElement("div");
+        div.className = "task" + (task.done ? " done" : "");
+        div.innerHTML = `
+          <strong>${task.name}</strong> (${task.type})<br>
+          📍 ${task.location}<br>
+          ⏱ ${task.time || "N/A"}<br>
+          🌤 ${task.weather || "Loading..."}<br>
+          📝 ${task.comments || ""}<br>
+          <button onclick="toggleDone(${i})">${task.done ? "Undo" : "Done"}</button>
+          <button onclick="deleteTask(${i})" style="background:#cc0000;">Delete</button>
+        `;
+
+        if (task.weather && task.weather.includes("⚠️")) {
+          div.style.border = "2px solid red";
+          div.style.background = "#ffe0e0";
+        }
+
+        taskList.appendChild(div);
+
+        if (task.lat && task.lon) {
+          const marker = L.marker([task.lat, task.lon]).addTo(map);
+          marker.bindPopup(
+            `<b>${task.name}</b><br>${task.type}<br>${task.weather || ""}`
+          );
+          markers.push(marker);
+        }
+      }
+
+      updateSummary();
+    }
+
+    // Toggle done status
+    function toggleDone(index) {
+      tasks[index].done = !tasks[index].done;
+      saveTasks();
+      renderTasks();
+    }
+
+    // Delete a task
+    function deleteTask(index) {
+      tasks.splice(index, 1);
+      saveTasks();
+      renderTasks();
+    }
+
+    // Geocode location
+    async function geocodeLocation(location) {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            location
+          )}`
+        );
+        const data = await res.json();
+        if (data.length > 0) {
+          return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+        }
+      } catch (e) {
+        console.error("Geocoding error", e);
+      }
+      return null;
+    }
+
+    // Add new task
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const locInput = document.getElementById("location").value;
+      const coords = await geocodeLocation(locInput);
+
+      const newTask = {
+        location: locInput,
+        name: document.getElementById("name").value,
+        type: document.getElementById("type").value,
+        time: document.getElementById("time").value,
+        comments: document.getElementById("comments").value,
+        done: false,
+        lat: coords ? coords.lat : null,
+        lon: coords ? coords.lon : null,
+        weather: null,
+      };
+
+      if (coords) {
+        const w = await fetchWeather(coords.lat, coords.lon);
+        newTask.weather = w.text;
+      }
+
+      tasks.push(newTask);
+      saveTasks();
+      renderTasks();
+      form.reset();
+    });
+
+    // Refresh weather
+    refreshBtn.addEventListener("click", async () => {
+      for (let task of tasks) {
+        if (task.lat && task.lon) {
+          const w = await fetchWeather(task.lat, task.lon);
+          task.weather = w.text;
+        }
+      }
+      saveTasks();
+      renderTasks();
+      alert("✅ Weather updated!");
+    });
+
+    // Plan route
+    routeBtn.addEventListener("click", () => {
+      if (!navigator.geolocation) {
+        alert("Geolocation not supported");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition((pos) => {
+        const start = [pos.coords.latitude, pos.coords.longitude];
+        const coords = tasks
+          .filter((t) => t.lat && t.lon)
+          .map((t) => [t.lat, t.lon]);
+
+        if (coords.length === 0) {
+          alert("No valid turbine locations to route.");
+          return;
+        }
+
+        const advisories = tasks.filter(
+          (t) => t.weather && t.weather.includes("⚠️")
+        );
+        if (advisories.length > 0) {
+          const names = advisories.map((t) => t.name).join(", ");
+          alert("⚠️ Advisable not to go to: " + names);
+        }
+
+        coords.sort((a, b) => {
+          const da = Math.hypot(a[0] - start[0], a[1] - start[1]);
+          const db = Math.hypot(b[0] - start[0], b[1] - start[1]);
+          return da - db;
+        });
+
+        const waypoints = [L.latLng(start[0], start[1])];
+        coords.forEach((c) => waypoints.push(L.latLng(c[0], c[1])));
+
+        if (routeControl) map.removeControl(routeControl);
+
+        routeControl = L.Routing.control({
+          waypoints: waypoints,
+          routeWhileDragging: true,
+        }).addTo(map);
+      });
+    });
+
+    // Update summary
+    function updateSummary() {
+      const total = tasks.length;
+      const unsafe = tasks.filter((t) => t.weather && t.weather.includes("⚠️")).length;
+
+      let totalHours = 0;
+      for (let t of tasks) {
+        if (t.time && /(\d+)/.test(t.time)) {
+          totalHours += parseFloat(t.time.match(/(\d+)/)[0]);
+        }
+      }
+
+      summaryDiv.innerHTML = `
+        <p><strong>Total turbines:</strong> ${total}</p>
+        <p><strong>Unsafe weather advisories:</strong> ${unsafe}</p>
+        <p><strong>Estimated total work time:</strong> ${totalHours} hours</p>
+      `;
+    }
+
+    // Export CSV
+    exportCsvBtn.addEventListener("click", () => {
+      let csv = "Name,Location,Type,Time,Comments,Weather,Done\n";
+      tasks.forEach((t) => {
+        csv += `"${t.name}","${t.location}","${t.type}","${t.time}","${t.comments}","${t.weather}","${t.done}"\n`;
+      });
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "trip_plan.csv";
+      a.click();
+    });
+
+    // Export PDF
+    exportPdfBtn.addEventListener("click", () => {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.setFontSize(16);
+      doc.text("Wind Turbine Trip Plan", 10, 10);
+
+      let y = 20;
+      tasks.forEach((t, i) => {
+        doc.setFontSize(12);
+        doc.text(`${i + 1}. ${t.name} (${t.type})`, 10, y);
+        y += 6;
+        doc.text(`📍 ${t.location}`, 10, y); y += 6;
+        doc.text(`⏱ ${t.time || "N/A"}`, 10, y); y += 6;
+        doc.text(`🌤 ${t.weather || "N/A"}`, 10, y); y += 6;
+        if (t.comments) {
+          doc.text(`📝 ${t.comments}`, 10, y);
+          y += 6;
+        }
+        y += 4;
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+      });
+
+      y += 10;
+      doc.setFontSize(14);
+      doc.text("Summary", 10, y);
+      y += 8;
+      doc.setFontSize(12);
+
+      const total = tasks.length;
+      const unsafe = tasks.filter((t) => t.weather && t.weather.includes("⚠️")).length;
+      let totalHours = 0;
+      for (let t of tasks) {
+        if (t.time && /(\d+)/.test(t.time)) {
+          totalHours += parseFloat(t.time.match(/(\d+)/)[0]);
+        }
+      }
+
+      doc.text(`Total turbines: ${total}`, 10, y); y += 6;
+      doc.text(`Unsafe weather advisories: ${unsafe}`, 10, y); y += 6;
+      doc.text(`Estimated total work time: ${totalHours} hours`, 10, y);
+
+      doc.save("trip_plan.pdf");
+    });
+
+    // Initialize on load
+    renderTasks();
+  </script>
+</body>
+</html>
