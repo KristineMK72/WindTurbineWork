@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wind Turbine Trip Planner</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+
+  <!-- jsPDF for PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+    }
+
+    h1 {
+      text-align: center;
+      margin: 10px;
+    }
+
+    form,
+    #controls,
+    #taskList,
+    #summary {
+      padding: 10px;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+      font-size: 16px;
+    }
+
+    .task {
+      border: 1px solid #ddd;
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 5px;
+    }
+
+    .done {
+      background: #e0ffe0;
+    }
+
+    button {
+      background: #0077cc;
+      color: white;
+      border: none;
+      cursor: pointer;
+      margin-top: 5px;
+    }
+
+    button:hover {
+      background: #005fa3;
+    }
+
+    #map {
+      height: 300px;
+      margin: 10px;
+    }
+
+    /* Button Colors */
+    #refreshBtn {
+      background: #28a745;
+    }
+
+    #refreshBtn:hover {
+      background: #1e7e34;
+    }
+
+    #routeBtn {
+      background: #ff9800;
+    }
+
+    #routeBtn:hover {
+      background: #e68900;
+    }
+
+    #exportCsvBtn {
+      background: #673ab7;
+    }
+
+    #exportCsvBtn:hover {
+      background: #512da8;
+    }
+
+    #exportPdfBtn {
+      background: #9c27b0;
+    }
+
+    #exportPdfBtn:hover {
+      backg
